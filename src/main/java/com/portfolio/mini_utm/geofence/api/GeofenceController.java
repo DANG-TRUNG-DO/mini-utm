@@ -15,6 +15,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.portfolio.mini_utm.geofence.api.dto.CreateGeofenceRequest;
+import com.portfolio.mini_utm.geofence.api.dto.CheckGeofenceRequest;
+import com.portfolio.mini_utm.geofence.api.dto.CheckGeofenceResponse;
 import com.portfolio.mini_utm.geofence.api.dto.GeofenceResponse;
 import com.portfolio.mini_utm.geofence.api.dto.UpdateGeofenceRequest;
 import com.portfolio.mini_utm.geofence.application.GeofenceService;
@@ -58,5 +60,10 @@ public class GeofenceController {
 	public ResponseEntity<Void> delete(@PathVariable UUID id) {
 		geofenceService.delete(id);
 		return ResponseEntity.noContent().build();
+	}
+
+	@PostMapping("/check")
+	public CheckGeofenceResponse check(@Valid @RequestBody CheckGeofenceRequest request) {
+		return geofenceService.checkRestrictions(request);
 	}
 }

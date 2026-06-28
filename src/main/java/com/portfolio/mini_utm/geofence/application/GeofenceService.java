@@ -10,6 +10,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.portfolio.mini_utm.geofence.api.dto.CreateGeofenceRequest;
+import com.portfolio.mini_utm.geofence.api.dto.CheckGeofenceRequest;
+import com.portfolio.mini_utm.geofence.api.dto.CheckGeofenceResponse;
+import com.portfolio.mini_utm.geofence.api.dto.GeofenceMatchResponse;
 import com.portfolio.mini_utm.geofence.api.dto.GeofenceResponse;
 import com.portfolio.mini_utm.geofence.api.dto.UpdateGeofenceRequest;
 import com.portfolio.mini_utm.geofence.domain.Geofence;
@@ -111,6 +114,22 @@ public class GeofenceService {
 		Geofence geofence = getGeofence(id);
 		geofenceRepository.delete(geofence);
 		geofenceRepository.flush();
+	}
+
+	@Transactional(readOnly = true)
+	public CheckGeofenceResponse checkRestrictions(CheckGeofenceRequest request) {
+		if (!Double.isFinite(request.longitude()) || !Double.isFinite(request.latitude())) {
+			throw new InvalidGeofenceException("Coordinates must be finite numbers");
+		}
+
+		List<GeofenceMatchResponse> matches = geofenceRepository.findRestrictionsCovering(
+				request.longitude(),
+				request.latitude(),
+				request.altitudeM(),
+				request.checkedAt()).stream()
+				.map(GeofenceMatchResponse::from)
+				.toList();
+		return new CheckGeofenceResponse(!matches.isEmpty(), matches);
 	}
 
 	private void validateAltitude(BigDecimal minimum, BigDecimal maximum) {

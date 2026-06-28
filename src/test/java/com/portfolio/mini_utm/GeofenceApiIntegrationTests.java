@@ -202,15 +202,94 @@ class GeofenceApiIntegrationTests extends PostgresIntegrationTest {
 				.andExpect(status().isNotFound());
 	}
 
+	@Test
+	void checkPointInsideOutsideAndOnPolygonBoundary() throws Exception {
+		createGeofence("ACTIVE-ZONE");
+		createGeofenceFromJson(validRequest("INACTIVE-ZONE").replace("\"active\":true", "\"active\":false"));
+		createGeofenceFromJson(validRequest("EXPIRED-ZONE")
+				.replace("2026-06-28T00:00:00Z", "2026-06-26T00:00:00Z")
+				.replace("2026-06-29T00:00:00Z", "2026-06-27T00:00:00Z"));
+
+		mockMvc.perform(post("/api/v1/geofences/check")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content(checkRequest(106.695, 10.775, 50, "2026-06-28T12:00:00Z")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.restricted").value(true))
+				.andExpect(jsonPath("$.matches", hasSize(1)))
+				.andExpect(jsonPath("$.matches[0].name").value("ACTIVE-ZONE"));
+
+		mockMvc.perform(post("/api/v1/geofences/check")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content(checkRequest(106.69, 10.775, 50, "2026-06-28T12:00:00Z")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.restricted").value(true))
+				.andExpect(jsonPath("$.matches[0].name").value("ACTIVE-ZONE"));
+
+		mockMvc.perform(post("/api/v1/geofences/check")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content(checkRequest(106.68, 10.75, 50, "2026-06-28T12:00:00Z")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.restricted").value(false))
+				.andExpect(jsonPath("$.matches", hasSize(0)));
+	}
+
+	@Test
+	void checkAltitudeAndHalfOpenValidityPeriod() throws Exception {
+		createGeofence("LIMITED-ZONE");
+
+		assertRestriction(106.695, 10.775, 19.99, "2026-06-28T12:00:00Z", false);
+		assertRestriction(106.695, 10.775, 20.00, "2026-06-28T12:00:00Z", true);
+		assertRestriction(106.695, 10.775, 120.00, "2026-06-28T12:00:00Z", true);
+		assertRestriction(106.695, 10.775, 120.01, "2026-06-28T12:00:00Z", false);
+		assertRestriction(106.695, 10.775, 50.00, "2026-06-28T00:00:00Z", true);
+		assertRestriction(106.695, 10.775, 50.00, "2026-06-29T00:00:00Z", false);
+	}
+
+	@Test
+	void rejectInvalidCheckCoordinates() throws Exception {
+		mockMvc.perform(post("/api/v1/geofences/check")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content(checkRequest(181, 10.775, 50, "2026-06-28T12:00:00Z")))
+				.andExpect(status().isBadRequest());
+	}
+
 	private UUID createGeofence(String name) throws Exception {
+		return createGeofenceFromJson(validRequest(name));
+	}
+
+	private UUID createGeofenceFromJson(String requestBody) throws Exception {
 		String response = mockMvc.perform(post("/api/v1/geofences")
 					.contentType(MediaType.APPLICATION_JSON)
-					.content(validRequest(name)))
+					.content(requestBody))
 				.andExpect(status().isCreated())
 				.andReturn()
 				.getResponse()
 				.getContentAsString();
 		return UUID.fromString(objectMapper.readTree(response).get("id").asText());
+	}
+
+	private void assertRestriction(
+			double longitude,
+			double latitude,
+			double altitude,
+			String checkedAt,
+			boolean expected) throws Exception {
+		mockMvc.perform(post("/api/v1/geofences/check")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content(checkRequest(longitude, latitude, altitude, checkedAt)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.restricted").value(expected));
+	}
+
+	private String checkRequest(double longitude, double latitude, double altitude, String checkedAt) {
+		return """
+				{
+				  "longitude":%s,
+				  "latitude":%s,
+				  "altitudeM":%s,
+				  "checkedAt":"%s"
+				}
+				""".formatted(longitude, latitude, altitude, checkedAt);
 	}
 
 	private String validRequest(String name) {
