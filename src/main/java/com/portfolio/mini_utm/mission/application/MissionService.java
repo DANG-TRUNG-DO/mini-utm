@@ -150,6 +150,36 @@ public class MissionService {
 					plannedEndAt);
 			throwIfRestricted(index, restrictions);
 		}
+		validateSegmentsAgainstGeofences(waypoints, plannedStartAt, plannedEndAt);
+	}
+
+	private void validateSegmentsAgainstGeofences(
+			List<MissionWaypointRequest> waypoints,
+			Instant plannedStartAt,
+			Instant plannedEndAt) {
+		for (int index = 0; index < waypoints.size() - 1; index++) {
+			MissionWaypointRequest start = waypoints.get(index);
+			MissionWaypointRequest end = waypoints.get(index + 1);
+			BigDecimal minimumAltitude = start.altitudeM().min(end.altitudeM());
+			BigDecimal maximumAltitude = start.altitudeM().max(end.altitudeM());
+			List<Geofence> restrictions = geofenceRepository.findRestrictionsIntersectingSegmentDuring(
+					start.longitude(),
+					start.latitude(),
+					end.longitude(),
+					end.latitude(),
+					minimumAltitude,
+					maximumAltitude,
+					plannedStartAt,
+					plannedEndAt);
+			if (!restrictions.isEmpty()) {
+				String names = restrictions.stream()
+						.map(Geofence::getName)
+						.collect(Collectors.joining(", "));
+				throw new InvalidMissionException(
+						"Flight segment %d-%d intersects active geofence(s): %s"
+								.formatted(index, index + 1, names));
+			}
+		}
 	}
 
 	private void validatePersistedWaypointsAgainstGeofences(Mission mission) {
@@ -162,6 +192,13 @@ public class MissionService {
 					mission.getPlannedEndAt());
 			throwIfRestricted(waypoint.getSequenceNumber(), restrictions);
 		}
+		List<MissionWaypointRequest> waypoints = mission.getWaypoints().stream()
+				.map(waypoint -> new MissionWaypointRequest(
+						waypoint.getPosition().getX(),
+						waypoint.getPosition().getY(),
+						BigDecimal.valueOf(waypoint.getPosition().getCoordinate().getZ())))
+				.toList();
+		validateSegmentsAgainstGeofences(waypoints, mission.getPlannedStartAt(), mission.getPlannedEndAt());
 	}
 
 	private void throwIfRestricted(int waypointIndex, List<Geofence> restrictions) {

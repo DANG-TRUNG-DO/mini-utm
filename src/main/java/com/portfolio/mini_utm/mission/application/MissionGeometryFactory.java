@@ -21,6 +21,11 @@ public class MissionGeometryFactory {
 		Coordinate[] coordinates = waypoints.stream()
 				.map(this::coordinate)
 				.toArray(Coordinate[]::new);
+		for (int index = 1; index < coordinates.length; index++) {
+			if (coordinates[index - 1].equals3D(coordinates[index])) {
+				throw new InvalidMissionException("Consecutive waypoints must not be identical");
+			}
+		}
 		return GEOMETRY_FACTORY.createLineString(coordinates);
 	}
 
