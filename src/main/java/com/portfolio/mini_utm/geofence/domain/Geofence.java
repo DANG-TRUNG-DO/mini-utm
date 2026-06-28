@@ -87,6 +87,25 @@ public class Geofence {
 		updatedAt = Instant.now();
 	}
 
+	public void updateDetails(
+			String name,
+			String description,
+			Polygon boundary,
+			BigDecimal minAltitudeM,
+			BigDecimal maxAltitudeM,
+			boolean active,
+			Instant validFrom,
+			Instant validUntil) {
+		this.name = name;
+		this.description = description;
+		this.boundary = boundary;
+		this.minAltitudeM = minAltitudeM;
+		this.maxAltitudeM = maxAltitudeM;
+		this.active = active;
+		this.validFrom = validFrom;
+		this.validUntil = validUntil;
+	}
+
 	public UUID getId() {
 		return id;
 	}

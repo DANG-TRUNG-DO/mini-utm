@@ -1,7 +1,9 @@
 package com.portfolio.mini_utm;
 
 import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -112,9 +114,103 @@ class GeofenceApiIntegrationTests extends PostgresIntegrationTest {
 
 	@Test
 	void returnNotFoundForUnknownGeofence() throws Exception {
-		mockMvc.perform(get("/api/v1/geofences/{id}", UUID.randomUUID()))
+		UUID unknownId = UUID.randomUUID();
+		mockMvc.perform(get("/api/v1/geofences/{id}", unknownId))
 				.andExpect(status().isNotFound())
 				.andExpect(jsonPath("$.title").value("Geofence not found"));
+
+		mockMvc.perform(patch("/api/v1/geofences/{id}", unknownId)
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("{\"active\":false}"))
+				.andExpect(status().isNotFound());
+
+		mockMvc.perform(delete("/api/v1/geofences/{id}", unknownId))
+				.andExpect(status().isNotFound());
+	}
+
+	@Test
+	void partiallyUpdateGeofenceAndPreserveUnspecifiedFields() throws Exception {
+		UUID id = createGeofence("SGN-UPDATE");
+
+		mockMvc.perform(patch("/api/v1/geofences/{id}", id)
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("""
+							{
+							  "name":"SGN-UPDATED",
+							  "description":"Updated restricted area",
+							  "active":false,
+							  "maxAltitudeM":150.00,
+							  "boundary":{"type":"Polygon","coordinates":[[
+							    [106.68,10.76],
+							    [106.71,10.76],
+							    [106.71,10.79],
+							    [106.68,10.79],
+							    [106.68,10.76]
+							  ]]}
+							}
+							"""))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.name").value("SGN-UPDATED"))
+				.andExpect(jsonPath("$.description").value("Updated restricted area"))
+				.andExpect(jsonPath("$.active").value(false))
+				.andExpect(jsonPath("$.minAltitudeM").value(20.0))
+				.andExpect(jsonPath("$.maxAltitudeM").value(150.0))
+				.andExpect(jsonPath("$.boundary.coordinates[0][0][0]").value(106.68))
+				.andExpect(jsonPath("$.validFrom").value("2026-06-28T00:00:00Z"));
+
+		mockMvc.perform(patch("/api/v1/geofences/{id}", id)
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("{\"active\":true}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.name").value("SGN-UPDATED"))
+				.andExpect(jsonPath("$.active").value(true))
+				.andExpect(jsonPath("$.maxAltitudeM").value(150.0));
+	}
+
+	@Test
+	void rejectDuplicateNameAndInvalidMergedStateDuringUpdate() throws Exception {
+		UUID firstId = createGeofence("ZONE-ONE");
+		createGeofence("ZONE-TWO");
+
+		mockMvc.perform(patch("/api/v1/geofences/{id}", firstId)
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("{\"name\":\"zone-two\"}"))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.title").value("Geofence conflict"));
+
+		mockMvc.perform(patch("/api/v1/geofences/{id}", firstId)
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("{\"minAltitudeM\":200.00}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.detail").value("Minimum altitude must not exceed maximum altitude"));
+
+		mockMvc.perform(patch("/api/v1/geofences/{id}", firstId)
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("{\"validUntil\":\"2026-06-27T00:00:00Z\"}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.detail").value("validFrom must be before validUntil"));
+	}
+
+	@Test
+	void deleteGeofenceAndReturnNoContent() throws Exception {
+		UUID id = createGeofence("ZONE-DELETE");
+
+		mockMvc.perform(delete("/api/v1/geofences/{id}", id))
+				.andExpect(status().isNoContent());
+
+		mockMvc.perform(get("/api/v1/geofences/{id}", id))
+				.andExpect(status().isNotFound());
+	}
+
+	private UUID createGeofence(String name) throws Exception {
+		String response = mockMvc.perform(post("/api/v1/geofences")
+					.contentType(MediaType.APPLICATION_JSON)
+					.content(validRequest(name)))
+				.andExpect(status().isCreated())
+				.andReturn()
+				.getResponse()
+				.getContentAsString();
+		return UUID.fromString(objectMapper.readTree(response).get("id").asText());
 	}
 
 	private String validRequest(String name) {

@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.portfolio.mini_utm.geofence.api.dto.CreateGeofenceRequest;
 import com.portfolio.mini_utm.geofence.api.dto.GeofenceResponse;
+import com.portfolio.mini_utm.geofence.api.dto.UpdateGeofenceRequest;
 import com.portfolio.mini_utm.geofence.domain.Geofence;
 import com.portfolio.mini_utm.geofence.repository.GeofenceRepository;
 
@@ -32,7 +33,7 @@ public class GeofenceService {
 			throw new DuplicateGeofenceNameException(name);
 		}
 		validateAltitude(request.minAltitudeM(), request.maxAltitudeM());
-		validateValidityPeriod(request);
+		validateValidityPeriod(request.validFrom(), request.validUntil());
 
 		Geofence geofence = new Geofence(
 				name,
@@ -60,8 +61,56 @@ public class GeofenceService {
 
 	@Transactional(readOnly = true)
 	public GeofenceResponse findById(UUID id) {
-		return toResponse(geofenceRepository.findById(id)
-				.orElseThrow(() -> new GeofenceNotFoundException(id)));
+		return toResponse(getGeofence(id));
+	}
+
+	@Transactional
+	public GeofenceResponse update(UUID id, UpdateGeofenceRequest request) {
+		Geofence geofence = getGeofence(id);
+		String name = request.name() == null ? geofence.getName() : request.name().trim();
+		if (geofenceRepository.existsByNameIgnoreCaseAndIdNot(name, id)) {
+			throw new DuplicateGeofenceNameException(name);
+		}
+
+		String description = request.description() == null
+				? geofence.getDescription()
+				: normalizeOptional(request.description());
+		var boundary = request.boundary() == null
+				? geofence.getBoundary()
+				: polygonMapper.toPolygon(request.boundary());
+		BigDecimal minimumAltitude = request.minAltitudeM() == null
+				? geofence.getMinAltitudeM()
+				: request.minAltitudeM();
+		BigDecimal maximumAltitude = request.maxAltitudeM() == null
+				? geofence.getMaxAltitudeM()
+				: request.maxAltitudeM();
+		boolean active = request.active() == null ? geofence.isActive() : request.active();
+		var validFrom = request.validFrom() == null ? geofence.getValidFrom() : request.validFrom();
+		var validUntil = request.validUntil() == null ? geofence.getValidUntil() : request.validUntil();
+
+		validateAltitude(minimumAltitude, maximumAltitude);
+		validateValidityPeriod(validFrom, validUntil);
+		geofence.updateDetails(
+				name,
+				description,
+				boundary,
+				minimumAltitude,
+				maximumAltitude,
+				active,
+				validFrom,
+				validUntil);
+		try {
+			return toResponse(geofenceRepository.saveAndFlush(geofence));
+		} catch (DataIntegrityViolationException exception) {
+			throw new DuplicateGeofenceNameException(name);
+		}
+	}
+
+	@Transactional
+	public void delete(UUID id) {
+		Geofence geofence = getGeofence(id);
+		geofenceRepository.delete(geofence);
+		geofenceRepository.flush();
 	}
 
 	private void validateAltitude(BigDecimal minimum, BigDecimal maximum) {
@@ -70,11 +119,15 @@ public class GeofenceService {
 		}
 	}
 
-	private void validateValidityPeriod(CreateGeofenceRequest request) {
-		if (request.validFrom() != null && request.validUntil() != null
-				&& !request.validFrom().isBefore(request.validUntil())) {
+	private void validateValidityPeriod(java.time.Instant validFrom, java.time.Instant validUntil) {
+		if (validFrom != null && validUntil != null && !validFrom.isBefore(validUntil)) {
 			throw new InvalidGeofenceException("validFrom must be before validUntil");
 		}
+	}
+
+	private Geofence getGeofence(UUID id) {
+		return geofenceRepository.findById(id)
+				.orElseThrow(() -> new GeofenceNotFoundException(id));
 	}
 
 	private String normalizeOptional(String value) {
