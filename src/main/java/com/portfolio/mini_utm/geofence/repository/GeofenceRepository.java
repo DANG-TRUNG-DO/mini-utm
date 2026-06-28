@@ -8,5 +8,5 @@ import com.portfolio.mini_utm.geofence.domain.Geofence;
 
 public interface GeofenceRepository extends JpaRepository<Geofence, UUID> {
 
-	boolean existsByName(String name);
+	boolean existsByNameIgnoreCase(String name);
 }
