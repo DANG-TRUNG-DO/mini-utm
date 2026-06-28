@@ -4,12 +4,13 @@ CREATE TABLE drones (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     serial_number       VARCHAR(100) NOT NULL,
     name                VARCHAR(150) NOT NULL,
-    status              VARCHAR(30) NOT NULL DEFAULT 'OFFLINE',
+    status              VARCHAR(30) NOT NULL DEFAULT 'INACTIVE',
     model               VARCHAR(100),
     registered_at       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_drones_serial_number UNIQUE (serial_number),
-    CONSTRAINT ck_drones_status CHECK (status IN ('OFFLINE', 'IDLE', 'IN_MISSION', 'MAINTENANCE', 'LOST'))
+    CONSTRAINT ck_drones_serial_number_normalized CHECK (serial_number = UPPER(BTRIM(serial_number))),
+    CONSTRAINT ck_drones_status CHECK (status IN ('ACTIVE', 'INACTIVE', 'MAINTENANCE'))
 );
 
 CREATE TABLE geofences (
@@ -42,16 +43,28 @@ CREATE TABLE missions (
     planned_path        geometry(LineStringZ, 4326),
     planned_start_at    TIMESTAMPTZ,
     planned_end_at      TIMESTAMPTZ,
+    approved_at         TIMESTAMPTZ,
     started_at          TIMESTAMPTZ,
     completed_at        TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_missions_drone FOREIGN KEY (drone_id) REFERENCES drones (id) ON DELETE RESTRICT,
     CONSTRAINT uk_missions_drone_name UNIQUE (drone_id, name),
-    CONSTRAINT ck_missions_status CHECK (status IN ('PLANNED', 'ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED', 'FAILED')),
+    CONSTRAINT ck_missions_status CHECK (status IN ('PLANNED', 'APPROVED', 'ACTIVE', 'COMPLETED', 'CANCELLED')),
     CONSTRAINT ck_missions_planned_time CHECK (
         planned_start_at IS NULL OR planned_end_at IS NULL OR planned_start_at < planned_end_at
     )
+);
+
+CREATE TABLE mission_waypoints (
+    id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    mission_id          UUID NOT NULL,
+    sequence_number     INTEGER NOT NULL,
+    position            geometry(PointZ, 4326) NOT NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_mission_waypoints_mission FOREIGN KEY (mission_id) REFERENCES missions (id) ON DELETE CASCADE,
+    CONSTRAINT uk_mission_waypoints_sequence UNIQUE (mission_id, sequence_number),
+    CONSTRAINT ck_mission_waypoints_sequence CHECK (sequence_number >= 0)
 );
 
 CREATE TABLE telemetry (
@@ -79,6 +92,7 @@ CREATE TABLE alerts (
     geofence_id         UUID,
     type                VARCHAR(50) NOT NULL,
     severity            VARCHAR(20) NOT NULL,
+    status              VARCHAR(20) NOT NULL DEFAULT 'OPEN',
     message             TEXT NOT NULL,
     detected_at         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     acknowledged_at     TIMESTAMPTZ,
@@ -86,7 +100,9 @@ CREATE TABLE alerts (
     CONSTRAINT fk_alerts_drone FOREIGN KEY (drone_id) REFERENCES drones (id) ON DELETE CASCADE,
     CONSTRAINT fk_alerts_mission FOREIGN KEY (mission_id) REFERENCES missions (id) ON DELETE SET NULL,
     CONSTRAINT fk_alerts_geofence FOREIGN KEY (geofence_id) REFERENCES geofences (id) ON DELETE SET NULL,
+    CONSTRAINT ck_alerts_type CHECK (type IN ('GEOFENCE_VIOLATION', 'TELEMETRY_LOSS', 'LOW_BATTERY', 'ROUTE_DEVIATION')),
     CONSTRAINT ck_alerts_severity CHECK (severity IN ('INFO', 'WARNING', 'CRITICAL')),
+    CONSTRAINT ck_alerts_status CHECK (status IN ('OPEN', 'ACKNOWLEDGED', 'RESOLVED')),
     CONSTRAINT ck_alerts_acknowledged CHECK (acknowledged_at IS NULL OR acknowledged_at >= detected_at),
     CONSTRAINT ck_alerts_resolved CHECK (resolved_at IS NULL OR resolved_at >= detected_at)
 );
@@ -98,10 +114,11 @@ CREATE INDEX idx_missions_drone_id ON missions (drone_id);
 CREATE INDEX idx_missions_status ON missions (status);
 CREATE INDEX idx_missions_planned_start_at ON missions (planned_start_at);
 CREATE INDEX idx_missions_planned_path_gist ON missions USING GIST (planned_path);
+CREATE INDEX idx_mission_waypoints_position_gist ON mission_waypoints USING GIST (position);
 CREATE INDEX idx_telemetry_mission_id ON telemetry (mission_id);
 CREATE INDEX idx_telemetry_recorded_at ON telemetry (recorded_at DESC);
 CREATE INDEX idx_telemetry_position_gist ON telemetry USING GIST (position);
 CREATE INDEX idx_alerts_drone_detected_at ON alerts (drone_id, detected_at DESC);
 CREATE INDEX idx_alerts_mission_id ON alerts (mission_id);
 CREATE INDEX idx_alerts_geofence_id ON alerts (geofence_id);
-CREATE INDEX idx_alerts_unresolved ON alerts (severity, detected_at DESC) WHERE resolved_at IS NULL;
+CREATE INDEX idx_alerts_unresolved ON alerts (severity, detected_at DESC) WHERE status <> 'RESOLVED';

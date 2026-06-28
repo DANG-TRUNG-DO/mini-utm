@@ -3,13 +3,13 @@ services:
     image: postgis/postgis:17-3.5
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${DB_NAME:-mini_utm}
-      POSTGRES_USER: ${DB_USERNAME:-mini_utm}
+      POSTGRES_DB: ${DB_NAME:-mini-utm}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
       TZ: UTC
       PGTZ: UTC
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "${DB_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
