@@ -3,6 +3,7 @@ package com.portfolio.mini_utm.telemetry.application;
 import java.time.Instant;
 import java.util.UUID;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -29,16 +30,19 @@ public class TelemetryService {
 	private final DroneRepository droneRepository;
 	private final MissionRepository missionRepository;
 	private final TelemetryGeometryFactory geometryFactory;
+	private final ApplicationEventPublisher eventPublisher;
 
 	public TelemetryService(
 			TelemetryRepository telemetryRepository,
 			DroneRepository droneRepository,
 			MissionRepository missionRepository,
-			TelemetryGeometryFactory geometryFactory) {
+			TelemetryGeometryFactory geometryFactory,
+			ApplicationEventPublisher eventPublisher) {
 		this.telemetryRepository = telemetryRepository;
 		this.droneRepository = droneRepository;
 		this.missionRepository = missionRepository;
 		this.geometryFactory = geometryFactory;
+		this.eventPublisher = eventPublisher;
 	}
 
 	@Transactional
@@ -59,11 +63,14 @@ public class TelemetryService {
 				request.speedMps(),
 				request.headingDegrees(),
 				request.batteryPercent());
+		TelemetryResponse response;
 		try {
-			return TelemetryResponse.from(telemetryRepository.saveAndFlush(telemetry));
+			response = TelemetryResponse.from(telemetryRepository.saveAndFlush(telemetry));
 		} catch (DataIntegrityViolationException exception) {
 			throw new DuplicateTelemetryException(drone.getId(), request.recordedAt());
 		}
+		eventPublisher.publishEvent(new TelemetryIngestedEvent(response));
+		return response;
 	}
 
 	@Transactional(readOnly = true)
