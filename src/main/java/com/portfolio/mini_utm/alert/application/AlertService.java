@@ -1,12 +1,23 @@
 package com.portfolio.mini_utm.alert.application;
 
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Locale;
+import java.util.UUID;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.portfolio.mini_utm.alert.api.dto.AlertPageResponse;
+import com.portfolio.mini_utm.alert.api.dto.AlertResponse;
 import com.portfolio.mini_utm.alert.domain.Alert;
+import com.portfolio.mini_utm.alert.domain.AlertSeverity;
 import com.portfolio.mini_utm.alert.domain.AlertStatus;
+import com.portfolio.mini_utm.alert.domain.AlertType;
 import com.portfolio.mini_utm.alert.repository.AlertRepository;
 import com.portfolio.mini_utm.drone.application.DroneNotFoundException;
 import com.portfolio.mini_utm.drone.domain.Drone;
@@ -17,6 +28,8 @@ import com.portfolio.mini_utm.geofence.repository.GeofenceRepository;
 import com.portfolio.mini_utm.mission.application.MissionNotFoundException;
 import com.portfolio.mini_utm.mission.domain.Mission;
 import com.portfolio.mini_utm.mission.repository.MissionRepository;
+
+import jakarta.persistence.criteria.Predicate;
 
 @Service
 public class AlertService {
@@ -49,6 +62,87 @@ public class AlertService {
 				drone.getId(), command.type(), dedupKey, AlertStatus.RESOLVED)
 				.map(existing -> refresh(existing, command))
 				.orElseGet(() -> create(drone, mission, geofence, command, dedupKey));
+	}
+
+	@Transactional(readOnly = true)
+	public AlertPageResponse findAll(
+			UUID droneId,
+			UUID missionId,
+			AlertType type,
+			AlertSeverity severity,
+			AlertStatus status,
+			int page,
+			int size) {
+		validatePage(page, size);
+		PageRequest pageable = PageRequest.of(
+				page,
+				size,
+				Sort.by(Sort.Order.desc("detectedAt"), Sort.Order.desc("id")));
+		Page<AlertResponse> result = alertRepository.findAll(
+				matching(droneId, missionId, type, severity, status), pageable)
+				.map(AlertResponse::from);
+		return AlertPageResponse.from(result);
+	}
+
+	@Transactional(readOnly = true)
+	public AlertResponse findById(UUID id) {
+		return AlertResponse.from(alertRepository.findDetailsById(id)
+				.orElseThrow(() -> new AlertNotFoundException(id)));
+	}
+
+	@Transactional
+	public AlertResponse acknowledge(UUID id) {
+		Alert alert = findByIdForUpdate(id);
+		alert.acknowledge(Instant.now());
+		return AlertResponse.from(alert);
+	}
+
+	@Transactional
+	public AlertResponse resolve(UUID id) {
+		Alert alert = findByIdForUpdate(id);
+		alert.resolve(Instant.now());
+		return AlertResponse.from(alert);
+	}
+
+	private Alert findByIdForUpdate(UUID id) {
+		return alertRepository.findByIdForUpdate(id)
+				.orElseThrow(() -> new AlertNotFoundException(id));
+	}
+
+	private Specification<Alert> matching(
+			UUID droneId,
+			UUID missionId,
+			AlertType type,
+			AlertSeverity severity,
+			AlertStatus status) {
+		return (root, query, criteriaBuilder) -> {
+			var predicates = new ArrayList<Predicate>();
+			if (droneId != null) {
+				predicates.add(criteriaBuilder.equal(root.get("drone").get("id"), droneId));
+			}
+			if (missionId != null) {
+				predicates.add(criteriaBuilder.equal(root.get("mission").get("id"), missionId));
+			}
+			if (type != null) {
+				predicates.add(criteriaBuilder.equal(root.get("type"), type));
+			}
+			if (severity != null) {
+				predicates.add(criteriaBuilder.equal(root.get("severity"), severity));
+			}
+			if (status != null) {
+				predicates.add(criteriaBuilder.equal(root.get("status"), status));
+			}
+			return criteriaBuilder.and(predicates.toArray(Predicate[]::new));
+		};
+	}
+
+	private void validatePage(int page, int size) {
+		if (page < 0) {
+			throw new InvalidAlertException("page must be greater than or equal to 0");
+		}
+		if (size < 1 || size > 200) {
+			throw new InvalidAlertException("size must be between 1 and 200");
+		}
 	}
 
 	private RaiseAlertResult refresh(Alert alert, RaiseAlertCommand command) {
