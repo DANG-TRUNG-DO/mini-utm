@@ -2,7 +2,11 @@ package com.portfolio.mini_utm.alert.application;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
@@ -56,6 +60,46 @@ public class AlertService {
 		String dedupKey = normalizeDedupKey(command.dedupKey());
 		Drone drone = droneRepository.findByIdForUpdate(command.droneId())
 				.orElseThrow(() -> new DroneNotFoundException(command.droneId()));
+		return raiseOrRefreshLocked(command, drone, dedupKey);
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void reconcileActive(
+			UUID droneId,
+			AlertType type,
+			List<RaiseAlertCommand> activeAlerts,
+			Instant observedAt) {
+		Objects.requireNonNull(type, "type must not be null");
+		Objects.requireNonNull(activeAlerts, "activeAlerts must not be null");
+		Objects.requireNonNull(observedAt, "observedAt must not be null");
+		Set<String> activeDedupKeys = new HashSet<>();
+		for (RaiseAlertCommand command : activeAlerts) {
+			if (!droneId.equals(command.droneId()) || type != command.type()) {
+				throw new InvalidAlertException(
+						"Reconciled alerts must have the specified drone and type");
+			}
+			if (!activeDedupKeys.add(normalizeDedupKey(command.dedupKey()))) {
+				throw new InvalidAlertException("Reconciled alerts must have unique dedup keys");
+			}
+		}
+
+		Drone drone = droneRepository.findByIdForUpdate(droneId)
+				.orElseThrow(() -> new DroneNotFoundException(droneId));
+		for (RaiseAlertCommand command : activeAlerts) {
+			raiseOrRefreshLocked(command, drone, normalizeDedupKey(command.dedupKey()));
+		}
+		for (Alert alert : alertRepository.findByDroneIdAndTypeAndStatusNot(
+				droneId, type, AlertStatus.RESOLVED)) {
+			if (!activeDedupKeys.contains(alert.getDedupKey())) {
+				alert.resolve(observedAt);
+			}
+		}
+	}
+
+	private RaiseAlertResult raiseOrRefreshLocked(
+			RaiseAlertCommand command,
+			Drone drone,
+			String dedupKey) {
 		Mission mission = resolveMission(command, drone);
 		Geofence geofence = resolveGeofence(command);
 

@@ -1,5 +1,6 @@
 package com.portfolio.mini_utm.alert.repository;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -38,5 +39,10 @@ public interface AlertRepository
 			UUID droneId,
 			AlertType type,
 			String dedupKey,
+			AlertStatus excludedStatus);
+
+	List<Alert> findByDroneIdAndTypeAndStatusNot(
+			UUID droneId,
+			AlertType type,
 			AlertStatus excludedStatus);
 }
