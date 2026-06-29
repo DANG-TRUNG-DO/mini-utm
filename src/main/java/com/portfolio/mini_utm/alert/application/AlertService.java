@@ -10,6 +10,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.portfolio.mini_utm.alert.api.dto.AlertPageResponse;
@@ -50,7 +51,7 @@ public class AlertService {
 		this.geofenceRepository = geofenceRepository;
 	}
 
-	@Transactional
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
 	public RaiseAlertResult raiseOrRefresh(RaiseAlertCommand command) {
 		String dedupKey = normalizeDedupKey(command.dedupKey());
 		Drone drone = droneRepository.findByIdForUpdate(command.droneId())
@@ -62,6 +63,24 @@ public class AlertService {
 				drone.getId(), command.type(), dedupKey, AlertStatus.RESOLVED)
 				.map(existing -> refresh(existing, command))
 				.orElseGet(() -> create(drone, mission, geofence, command, dedupKey));
+	}
+
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public boolean resolveActive(
+			UUID droneId,
+			AlertType type,
+			String dedupKey,
+			Instant resolvedAt) {
+		String normalizedKey = normalizeDedupKey(dedupKey);
+		Drone drone = droneRepository.findByIdForUpdate(droneId)
+				.orElseThrow(() -> new DroneNotFoundException(droneId));
+		return alertRepository.findByDroneIdAndTypeAndDedupKeyAndStatusNot(
+				drone.getId(), type, normalizedKey, AlertStatus.RESOLVED)
+				.map(alert -> {
+					alert.resolve(resolvedAt);
+					return true;
+				})
+				.orElse(false);
 	}
 
 	@Transactional(readOnly = true)
