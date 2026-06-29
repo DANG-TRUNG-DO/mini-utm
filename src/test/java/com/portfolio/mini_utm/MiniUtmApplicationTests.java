@@ -30,7 +30,7 @@ class MiniUtmApplicationTests extends PostgresIntegrationTest {
 				ORDER BY table_name
 				""", String.class);
 
-		assertThat(successfulMigrations).isEqualTo(1);
+		assertThat(successfulMigrations).isEqualTo(2);
 		assertThat(tables).containsExactly(
 				"alerts", "drones", "geofences", "mission_waypoints", "missions", "telemetry");
 	}
@@ -67,5 +67,20 @@ class MiniUtmApplicationTests extends PostgresIntegrationTest {
 				.contains("INFO", "WARNING", "CRITICAL");
 		assertThat(constraints.get("ck_alerts_status"))
 				.contains("OPEN", "ACKNOWLEDGED", "RESOLVED");
+	}
+
+	@Test
+	void alertDeduplicationMigrationCreatesPartialUniqueIndex() {
+		String indexDefinition = jdbcTemplate.queryForObject("""
+				SELECT indexdef
+				FROM pg_indexes
+				WHERE schemaname = 'public'
+				  AND indexname = 'uk_alerts_active_dedup'
+				""", String.class);
+
+		assertThat(indexDefinition)
+				.containsIgnoringCase("UNIQUE")
+				.contains("drone_id", "type", "dedup_key")
+				.contains("status", "RESOLVED");
 	}
 }

@@ -56,6 +56,27 @@ class AlertDomainTests {
 		assertThat(invalidTimestamp.getStatus()).isEqualTo(AlertStatus.OPEN);
 	}
 
+	@Test
+	void refreshTracksOccurrencesWithoutDowngradingSeverityOrMovingTimeBackward() {
+		Alert alert = alert();
+		alert.refresh(
+				AlertSeverity.CRITICAL,
+				"Battery reached a critical level",
+				DETECTED_AT.plusSeconds(20));
+		alert.refresh(
+				AlertSeverity.INFO,
+				"Older out-of-order observation",
+				DETECTED_AT.plusSeconds(10));
+
+		assertThat(alert.getSeverity()).isEqualTo(AlertSeverity.CRITICAL);
+		assertThat(alert.getMessage()).isEqualTo("Battery reached a critical level");
+		assertThat(alert.getLastDetectedAt()).isEqualTo(DETECTED_AT.plusSeconds(20));
+		assertThat(alert.getOccurrenceCount()).isEqualTo(3);
+		assertThatThrownBy(() -> alert.resolve(DETECTED_AT.plusSeconds(15)))
+				.isInstanceOf(IllegalArgumentException.class);
+		assertThat(alert.getStatus()).isEqualTo(AlertStatus.OPEN);
+	}
+
 	private Alert alert() {
 		return new Alert(
 				new Drone("ALERT-DOMAIN-UAV", "Alert domain drone", "Quad-X"),
@@ -63,6 +84,7 @@ class AlertDomainTests {
 				null,
 				AlertType.LOW_BATTERY,
 				AlertSeverity.WARNING,
+				"battery-threshold",
 				"Battery level is below threshold",
 				DETECTED_AT);
 	}

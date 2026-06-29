@@ -64,6 +64,7 @@ class AlertRepositoryIntegrationTests extends PostgresIntegrationTest {
 				geofence,
 				AlertType.GEOFENCE_VIOLATION,
 				AlertSeverity.CRITICAL,
+				geofence.getId().toString(),
 				"Drone entered a restricted geofence",
 				detectedAt);
 		alert.acknowledge(acknowledgedAt);
@@ -79,7 +80,10 @@ class AlertRepositoryIntegrationTests extends PostgresIntegrationTest {
 		assertThat(reloaded.getType()).isEqualTo(AlertType.GEOFENCE_VIOLATION);
 		assertThat(reloaded.getSeverity()).isEqualTo(AlertSeverity.CRITICAL);
 		assertThat(reloaded.getStatus()).isEqualTo(AlertStatus.RESOLVED);
+		assertThat(reloaded.getDedupKey()).isEqualTo(geofence.getId().toString());
 		assertThat(reloaded.getDetectedAt()).isEqualTo(detectedAt);
+		assertThat(reloaded.getLastDetectedAt()).isEqualTo(detectedAt);
+		assertThat(reloaded.getOccurrenceCount()).isEqualTo(1);
 		assertThat(reloaded.getAcknowledgedAt()).isEqualTo(acknowledgedAt);
 		assertThat(reloaded.getResolvedAt()).isEqualTo(resolvedAt);
 	}

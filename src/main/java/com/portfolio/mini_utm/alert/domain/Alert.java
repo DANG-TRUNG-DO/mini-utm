@@ -1,6 +1,7 @@
 package com.portfolio.mini_utm.alert.domain;
 
 import java.time.Instant;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -55,8 +56,17 @@ public class Alert {
 	@Column(nullable = false, columnDefinition = "text")
 	private String message;
 
+	@Column(name = "dedup_key", nullable = false, length = 200, updatable = false)
+	private String dedupKey;
+
 	@Column(name = "detected_at", nullable = false, updatable = false)
 	private Instant detectedAt;
+
+	@Column(name = "last_detected_at", nullable = false)
+	private Instant lastDetectedAt;
+
+	@Column(name = "occurrence_count", nullable = false)
+	private int occurrenceCount;
 
 	@Column(name = "acknowledged_at")
 	private Instant acknowledgedAt;
@@ -73,6 +83,7 @@ public class Alert {
 			Geofence geofence,
 			AlertType type,
 			AlertSeverity severity,
+			String dedupKey,
 			String message,
 			Instant detectedAt) {
 		this.drone = Objects.requireNonNull(drone, "drone must not be null");
@@ -80,19 +91,42 @@ public class Alert {
 		this.geofence = geofence;
 		this.type = Objects.requireNonNull(type, "type must not be null");
 		this.severity = Objects.requireNonNull(severity, "severity must not be null");
+		this.dedupKey = requireDedupKey(dedupKey);
 		this.message = requireMessage(message);
 		this.detectedAt = Objects.requireNonNull(detectedAt, "detectedAt must not be null");
+		this.lastDetectedAt = detectedAt;
+		this.occurrenceCount = 1;
 		this.status = AlertStatus.OPEN;
 	}
 
+	public void refresh(
+			AlertSeverity observedSeverity,
+			String observedMessage,
+			Instant observedAt) {
+		Objects.requireNonNull(observedSeverity, "severity must not be null");
+		Objects.requireNonNull(observedAt, "observedAt must not be null");
+		if (observedAt.isBefore(detectedAt)) {
+			throw new IllegalArgumentException("Alert occurrence must not precede detection");
+		}
+		String validMessage = requireMessage(observedMessage);
+		if (observedSeverity.ordinal() > severity.ordinal()) {
+			severity = observedSeverity;
+		}
+		if (!observedAt.isBefore(lastDetectedAt)) {
+			lastDetectedAt = observedAt;
+			message = validMessage;
+		}
+		occurrenceCount++;
+	}
+
 	public void acknowledge(Instant occurredAt) {
-		Instant validOccurrence = requireValidOccurrence(occurredAt);
+		Instant validOccurrence = requireValidOccurrence(occurredAt, detectedAt);
 		transitionTo(AlertStatus.ACKNOWLEDGED);
 		acknowledgedAt = validOccurrence;
 	}
 
 	public void resolve(Instant occurredAt) {
-		Instant validOccurrence = requireValidOccurrence(occurredAt);
+		Instant validOccurrence = requireValidOccurrence(occurredAt, lastDetectedAt);
 		transitionTo(AlertStatus.RESOLVED);
 		resolvedAt = validOccurrence;
 	}
@@ -104,9 +138,9 @@ public class Alert {
 		status = target;
 	}
 
-	private Instant requireValidOccurrence(Instant occurredAt) {
+	private Instant requireValidOccurrence(Instant occurredAt, Instant earliestAllowed) {
 		Objects.requireNonNull(occurredAt, "occurredAt must not be null");
-		if (occurredAt.isBefore(detectedAt)) {
+		if (occurredAt.isBefore(earliestAllowed)) {
 			throw new IllegalArgumentException("Alert status timestamp must not precede detection");
 		}
 		return occurredAt;
@@ -117,6 +151,17 @@ public class Alert {
 			throw new IllegalArgumentException("message must not be blank");
 		}
 		return message.trim();
+	}
+
+	private static String requireDedupKey(String dedupKey) {
+		if (dedupKey == null || dedupKey.isBlank()) {
+			throw new IllegalArgumentException("dedupKey must not be blank");
+		}
+		String normalized = dedupKey.trim().toLowerCase(Locale.ROOT);
+		if (normalized.length() > 200) {
+			throw new IllegalArgumentException("dedupKey must not exceed 200 characters");
+		}
+		return normalized;
 	}
 
 	public UUID getId() {
@@ -151,8 +196,20 @@ public class Alert {
 		return message;
 	}
 
+	public String getDedupKey() {
+		return dedupKey;
+	}
+
 	public Instant getDetectedAt() {
 		return detectedAt;
+	}
+
+	public Instant getLastDetectedAt() {
+		return lastDetectedAt;
+	}
+
+	public int getOccurrenceCount() {
+		return occurrenceCount;
 	}
 
 	public Instant getAcknowledgedAt() {
