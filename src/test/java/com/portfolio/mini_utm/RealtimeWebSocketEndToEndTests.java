@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import org.junit.jupiter.api.AfterEach;
@@ -38,9 +39,13 @@ import org.springframework.web.socket.messaging.WebSocketStompClient;
 import org.springframework.web.socket.messaging.SessionSubscribeEvent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.portfolio.mini_utm.alert.domain.AlertStatus;
+import com.portfolio.mini_utm.alert.domain.AlertType;
+import com.portfolio.mini_utm.alert.repository.AlertRepository;
 import com.portfolio.mini_utm.drone.domain.Drone;
 import com.portfolio.mini_utm.drone.domain.DroneStatus;
 import com.portfolio.mini_utm.drone.repository.DroneRepository;
+import com.portfolio.mini_utm.realtime.message.AlertRealtimeMessage;
 import com.portfolio.mini_utm.realtime.message.TelemetryRealtimeMessage;
 import com.portfolio.mini_utm.realtime.messaging.StompRealtimePublisher;
 import com.portfolio.mini_utm.telemetry.api.dto.IngestTelemetryRequest;
@@ -63,6 +68,9 @@ class RealtimeWebSocketEndToEndTests extends PostgresIntegrationTest {
 
 	@Autowired
 	private TelemetryRepository telemetryRepository;
+
+	@Autowired
+	private AlertRepository alertRepository;
 
 	@Autowired
 	private DroneRepository droneRepository;
@@ -131,6 +139,54 @@ class RealtimeWebSocketEndToEndTests extends PostgresIntegrationTest {
 				.isEqualTo(droneA.getId());
 	}
 
+	@Test
+	void deliverAlertLifecycleToSubscribedDroneTopic() throws Exception {
+		Drone drone = activeDrone("WS-ALERT-E2E-UAV-001");
+		connect();
+		AlertMessageCollector collector = subscribeAlerts(drone);
+
+		ResponseEntity<TelemetryResponse> lowBatteryResponse = ingest(
+				drone,
+				new BigDecimal("15.00"),
+				Instant.parse("2026-07-01T04:00:00Z"));
+		AlertRealtimeMessage opened = collector.nextMessage(5, SECONDS);
+
+		assertThat(lowBatteryResponse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+		assertThat(opened.alertId()).isNotNull();
+		assertThat(opened.droneId()).isEqualTo(drone.getId());
+		assertThat(opened.type()).isEqualTo(AlertType.LOW_BATTERY);
+		assertThat(opened.status()).isEqualTo(AlertStatus.OPEN);
+		assertThat(opened.occurrenceCount()).isEqualTo(1);
+
+		ResponseEntity<TelemetryResponse> recoveredResponse = ingest(
+				drone,
+				new BigDecimal("30.00"),
+				Instant.parse("2026-07-01T04:00:10Z"));
+		AlertRealtimeMessage resolved = collector.nextMessage(5, SECONDS);
+
+		assertThat(recoveredResponse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+		assertThat(resolved.alertId()).isEqualTo(opened.alertId());
+		assertThat(resolved.status()).isEqualTo(AlertStatus.RESOLVED);
+		assertThat(resolved.resolvedAt()).isEqualTo(Instant.parse("2026-07-01T04:00:10Z"));
+	}
+
+	@Test
+	void isolateAlertSubscriptionsByDrone() throws Exception {
+		Drone droneA = activeDrone("WS-ALERT-E2E-UAV-002");
+		Drone droneB = activeDrone("WS-ALERT-E2E-UAV-003");
+		connect();
+		AlertMessageCollector collectorA = subscribeAlerts(droneA);
+		AlertMessageCollector collectorB = subscribeAlerts(droneB);
+
+		ingest(
+				droneB,
+				new BigDecimal("12.00"),
+				Instant.parse("2026-07-01T04:05:00Z"));
+
+		assertThat(collectorB.nextMessage(5, SECONDS).droneId()).isEqualTo(droneB.getId());
+		assertThat(collectorA.nextMessage(500, MILLISECONDS)).isNull();
+	}
+
 	private void connect() throws Exception {
 		stompSession = stompClient.connectAsync(
 				"ws://localhost:" + serverPort + "/ws",
@@ -146,7 +202,22 @@ class RealtimeWebSocketEndToEndTests extends PostgresIntegrationTest {
 		return collector;
 	}
 
+	private AlertMessageCollector subscribeAlerts(Drone drone) throws Exception {
+		AlertMessageCollector collector = new AlertMessageCollector();
+		String destination = StompRealtimePublisher.alertDestination(drone.getId());
+		stompSession.subscribe(destination, collector);
+		subscriptionProbe.await(destination);
+		return collector;
+	}
+
 	private ResponseEntity<TelemetryResponse> ingest(Drone drone, Instant recordedAt) {
+		return ingest(drone, new BigDecimal("82.25"), recordedAt);
+	}
+
+	private ResponseEntity<TelemetryResponse> ingest(
+			Drone drone,
+			BigDecimal batteryPercent,
+			Instant recordedAt) {
 		return restTemplate.postForEntity(
 				"/api/v1/telemetry",
 				new IngestTelemetryRequest(
@@ -157,7 +228,7 @@ class RealtimeWebSocketEndToEndTests extends PostgresIntegrationTest {
 						new BigDecimal("75.50"),
 						new BigDecimal("12.345"),
 						new BigDecimal("181.50"),
-						new BigDecimal("82.25"),
+						batteryPercent,
 						recordedAt),
 				TelemetryResponse.class);
 	}
@@ -169,10 +240,32 @@ class RealtimeWebSocketEndToEndTests extends PostgresIntegrationTest {
 	}
 
 	private void cleanDatabase() {
+		alertRepository.deleteAll();
+		alertRepository.flush();
 		telemetryRepository.deleteAll();
 		telemetryRepository.flush();
 		droneRepository.deleteAll();
 		droneRepository.flush();
+	}
+
+	private static final class AlertMessageCollector implements StompFrameHandler {
+
+		private final BlockingQueue<AlertRealtimeMessage> messages = new LinkedBlockingQueue<>();
+
+		@Override
+		public Type getPayloadType(StompHeaders headers) {
+			return AlertRealtimeMessage.class;
+		}
+
+		@Override
+		public void handleFrame(StompHeaders headers, Object payload) {
+			messages.add((AlertRealtimeMessage) payload);
+		}
+
+		AlertRealtimeMessage nextMessage(long timeout, TimeUnit unit)
+				throws InterruptedException {
+			return messages.poll(timeout, unit);
+		}
 	}
 
 	private static final class MessageCollector implements StompFrameHandler {
