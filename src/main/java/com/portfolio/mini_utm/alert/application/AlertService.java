@@ -9,6 +9,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -43,16 +44,19 @@ public class AlertService {
 	private final DroneRepository droneRepository;
 	private final MissionRepository missionRepository;
 	private final GeofenceRepository geofenceRepository;
+	private final ApplicationEventPublisher eventPublisher;
 
 	public AlertService(
 			AlertRepository alertRepository,
 			DroneRepository droneRepository,
 			MissionRepository missionRepository,
-			GeofenceRepository geofenceRepository) {
+			GeofenceRepository geofenceRepository,
+			ApplicationEventPublisher eventPublisher) {
 		this.alertRepository = alertRepository;
 		this.droneRepository = droneRepository;
 		this.missionRepository = missionRepository;
 		this.geofenceRepository = geofenceRepository;
+		this.eventPublisher = eventPublisher;
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -60,7 +64,9 @@ public class AlertService {
 		String dedupKey = normalizeDedupKey(command.dedupKey());
 		Drone drone = droneRepository.findByIdForUpdate(command.droneId())
 				.orElseThrow(() -> new DroneNotFoundException(command.droneId()));
-		return raiseOrRefreshLocked(command, drone, dedupKey);
+		RaiseAlertResult result = raiseOrRefreshLocked(command, drone, dedupKey);
+		publishChanged(result.alert());
+		return result;
 	}
 
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -86,12 +92,15 @@ public class AlertService {
 		Drone drone = droneRepository.findByIdForUpdate(droneId)
 				.orElseThrow(() -> new DroneNotFoundException(droneId));
 		for (RaiseAlertCommand command : activeAlerts) {
-			raiseOrRefreshLocked(command, drone, normalizeDedupKey(command.dedupKey()));
+			RaiseAlertResult result = raiseOrRefreshLocked(
+					command, drone, normalizeDedupKey(command.dedupKey()));
+			publishChanged(result.alert());
 		}
 		for (Alert alert : alertRepository.findByDroneIdAndTypeAndStatusNot(
 				droneId, type, AlertStatus.RESOLVED)) {
 			if (!activeDedupKeys.contains(alert.getDedupKey())) {
 				alert.resolve(observedAt);
+				publishChanged(alert);
 			}
 		}
 	}
@@ -122,6 +131,7 @@ public class AlertService {
 				drone.getId(), type, normalizedKey, AlertStatus.RESOLVED)
 				.map(alert -> {
 					alert.resolve(resolvedAt);
+					publishChanged(alert);
 					return true;
 				})
 				.orElse(false);
@@ -157,19 +167,25 @@ public class AlertService {
 	public AlertResponse acknowledge(UUID id) {
 		Alert alert = findByIdForUpdate(id);
 		alert.acknowledge(Instant.now());
-		return AlertResponse.from(alert);
+		return publishChanged(alert);
 	}
 
 	@Transactional
 	public AlertResponse resolve(UUID id) {
 		Alert alert = findByIdForUpdate(id);
 		alert.resolve(Instant.now());
-		return AlertResponse.from(alert);
+		return publishChanged(alert);
 	}
 
 	private Alert findByIdForUpdate(UUID id) {
 		return alertRepository.findByIdForUpdate(id)
 				.orElseThrow(() -> new AlertNotFoundException(id));
+	}
+
+	private AlertResponse publishChanged(Alert alert) {
+		AlertResponse response = AlertResponse.from(alert);
+		eventPublisher.publishEvent(new AlertChangedEvent(response));
+		return response;
 	}
 
 	private Specification<Alert> matching(

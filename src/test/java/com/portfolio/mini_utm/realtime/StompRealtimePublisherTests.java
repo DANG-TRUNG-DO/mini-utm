@@ -64,6 +64,8 @@ class StompRealtimePublisherTests {
 				AlertStatus.OPEN,
 				"Drone entered a restricted geofence",
 				Instant.parse("2026-06-29T03:00:00Z"),
+				Instant.parse("2026-06-29T03:00:00Z"),
+				1,
 				null,
 				null);
 
