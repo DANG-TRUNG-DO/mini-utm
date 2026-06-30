@@ -1,4 +1,4 @@
-# Testing telemetry realtime
+# Testing telemetry and alert realtime
 
 The application exposes a native STOMP WebSocket endpoint at:
 
@@ -10,6 +10,12 @@ Telemetry for a drone is published to:
 
 ```text
 /topic/drones/{droneId}/telemetry
+```
+
+Alert lifecycle updates for the same drone are published to:
+
+```text
+/topic/drones/{droneId}/alerts
 ```
 
 ## Start the application
@@ -32,7 +38,7 @@ npm init -y
 npm install @stomp/stompjs ws
 ```
 
-Create `watch-telemetry.mjs`:
+Create `watch-realtime.mjs`:
 
 ```javascript
 import { Client } from '@stomp/stompjs';
@@ -47,10 +53,14 @@ const client = new Client({
   webSocketFactory: () => new WebSocket('ws://localhost:8080/ws'),
   reconnectDelay: 2000,
   onConnect: () => {
-    const topic = `/topic/drones/${droneId}/telemetry`;
-    console.log(`Subscribed to ${topic}`);
-    client.subscribe(topic, frame => {
-      console.log(JSON.parse(frame.body));
+    const telemetryTopic = `/topic/drones/${droneId}/telemetry`;
+    const alertTopic = `/topic/drones/${droneId}/alerts`;
+    console.log(`Subscribed to ${telemetryTopic} and ${alertTopic}`);
+    client.subscribe(telemetryTopic, frame => {
+      console.log('TELEMETRY', JSON.parse(frame.body));
+    });
+    client.subscribe(alertTopic, frame => {
+      console.log('ALERT', JSON.parse(frame.body));
     });
   },
   onStompError: frame => console.error(frame.headers.message, frame.body)
@@ -62,7 +72,7 @@ client.activate();
 Run it with the ID of an existing drone:
 
 ```powershell
-node watch-telemetry.mjs <droneId>
+node watch-realtime.mjs <droneId>
 ```
 
 ## Ingest telemetry with Postman
@@ -85,4 +95,7 @@ unique for that drone.
 ```
 
 After the REST request returns `201 Created`, the subscriber prints the
-telemetry message. A subscriber for another drone ID must not receive it.
+telemetry message. Set `batteryPercent` to `20` or lower to also receive an open
+`LOW_BATTERY` alert. Send a later sample with `batteryPercent` at `25` or higher
+to receive the same alert with status `RESOLVED`. A subscriber for another drone
+ID must not receive either message stream.
