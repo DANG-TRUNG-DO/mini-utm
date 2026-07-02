@@ -13,8 +13,11 @@ import org.springframework.web.bind.annotation.RestController;
 import com.portfolio.mini_utm.telemetry.api.dto.TelemetryPageResponse;
 import com.portfolio.mini_utm.telemetry.application.TelemetryService;
 
+import static com.portfolio.mini_utm.config.ApiPaths.DRONE_TELEMETRY;
+import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
+
 @RestController
-@RequestMapping("/api/v1/drones/{droneId}/telemetry")
+@RequestMapping(value = DRONE_TELEMETRY, produces = APPLICATION_JSON_VALUE)
 public class DroneTelemetryHistoryController {
 
 	private final TelemetryService telemetryService;

@@ -14,8 +14,11 @@ import com.portfolio.mini_utm.telemetry.application.TelemetryService;
 
 import jakarta.validation.Valid;
 
+import static com.portfolio.mini_utm.config.ApiPaths.TELEMETRY;
+import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
+
 @RestController
-@RequestMapping("/api/v1/telemetry")
+@RequestMapping(value = TELEMETRY, produces = APPLICATION_JSON_VALUE)
 public class TelemetryController {
 
 	private final TelemetryService telemetryService;
@@ -24,9 +27,9 @@ public class TelemetryController {
 		this.telemetryService = telemetryService;
 	}
 
-	@PostMapping
+	@PostMapping(consumes = APPLICATION_JSON_VALUE)
 	public ResponseEntity<TelemetryResponse> ingest(@Valid @RequestBody IngestTelemetryRequest request) {
 		TelemetryResponse response = telemetryService.ingest(request);
-		return ResponseEntity.created(URI.create("/api/v1/telemetry/" + response.id())).body(response);
+		return ResponseEntity.created(URI.create(TELEMETRY + "/" + response.id())).body(response);
 	}
 }

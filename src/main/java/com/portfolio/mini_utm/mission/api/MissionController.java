@@ -18,8 +18,11 @@ import com.portfolio.mini_utm.mission.application.MissionService;
 
 import jakarta.validation.Valid;
 
+import static com.portfolio.mini_utm.config.ApiPaths.MISSIONS;
+import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
+
 @RestController
-@RequestMapping("/api/v1/missions")
+@RequestMapping(value = MISSIONS, produces = APPLICATION_JSON_VALUE)
 public class MissionController {
 
 	private final MissionService missionService;
@@ -28,10 +31,10 @@ public class MissionController {
 		this.missionService = missionService;
 	}
 
-	@PostMapping
+	@PostMapping(consumes = APPLICATION_JSON_VALUE)
 	public ResponseEntity<MissionResponse> create(@Valid @RequestBody CreateMissionRequest request) {
 		MissionResponse response = missionService.create(request);
-		return ResponseEntity.created(URI.create("/api/v1/missions/" + response.id())).body(response);
+		return ResponseEntity.created(URI.create(MISSIONS + "/" + response.id())).body(response);
 	}
 
 	@GetMapping

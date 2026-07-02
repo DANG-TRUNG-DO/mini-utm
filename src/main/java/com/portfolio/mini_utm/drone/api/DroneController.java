@@ -22,9 +22,12 @@ import com.portfolio.mini_utm.drone.application.DroneService;
 
 import jakarta.validation.Valid;
 
+import static com.portfolio.mini_utm.config.ApiPaths.DRONES;
+import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
+
 @Validated
 @RestController
-@RequestMapping("/api/v1/drones")
+@RequestMapping(value = DRONES, produces = APPLICATION_JSON_VALUE)
 public class DroneController {
 
 	private final DroneService droneService;
@@ -33,10 +36,10 @@ public class DroneController {
 		this.droneService = droneService;
 	}
 
-	@PostMapping
+	@PostMapping(consumes = APPLICATION_JSON_VALUE)
 	public ResponseEntity<DroneResponse> register(@Valid @RequestBody RegisterDroneRequest request) {
 		DroneResponse response = droneService.register(request);
-		return ResponseEntity.created(URI.create("/api/v1/drones/" + response.id())).body(response);
+		return ResponseEntity.created(URI.create(DRONES + "/" + response.id())).body(response);
 	}
 
 	@GetMapping
@@ -49,12 +52,12 @@ public class DroneController {
 		return droneService.findById(id);
 	}
 
-	@PatchMapping("/{id}")
+	@PatchMapping(value = "/{id}", consumes = APPLICATION_JSON_VALUE)
 	public DroneResponse update(@PathVariable UUID id, @Valid @RequestBody UpdateDroneRequest request) {
 		return droneService.update(id, request);
 	}
 
-	@PatchMapping("/{id}/status")
+	@PatchMapping(value = "/{id}/status", consumes = APPLICATION_JSON_VALUE)
 	public DroneResponse updateStatus(
 			@PathVariable UUID id,
 			@Valid @RequestBody UpdateDroneStatusRequest request) {

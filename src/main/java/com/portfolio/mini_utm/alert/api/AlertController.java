@@ -16,8 +16,11 @@ import com.portfolio.mini_utm.alert.domain.AlertSeverity;
 import com.portfolio.mini_utm.alert.domain.AlertStatus;
 import com.portfolio.mini_utm.alert.domain.AlertType;
 
+import static com.portfolio.mini_utm.config.ApiPaths.ALERTS;
+import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
+
 @RestController
-@RequestMapping("/api/v1/alerts")
+@RequestMapping(value = ALERTS, produces = APPLICATION_JSON_VALUE)
 public class AlertController {
 
 	private final AlertService alertService;

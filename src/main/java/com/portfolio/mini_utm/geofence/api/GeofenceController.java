@@ -23,8 +23,11 @@ import com.portfolio.mini_utm.geofence.application.GeofenceService;
 
 import jakarta.validation.Valid;
 
+import static com.portfolio.mini_utm.config.ApiPaths.GEOFENCES;
+import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
+
 @RestController
-@RequestMapping("/api/v1/geofences")
+@RequestMapping(value = GEOFENCES, produces = APPLICATION_JSON_VALUE)
 public class GeofenceController {
 
 	private final GeofenceService geofenceService;
@@ -33,10 +36,10 @@ public class GeofenceController {
 		this.geofenceService = geofenceService;
 	}
 
-	@PostMapping
+	@PostMapping(consumes = APPLICATION_JSON_VALUE)
 	public ResponseEntity<GeofenceResponse> create(@Valid @RequestBody CreateGeofenceRequest request) {
 		GeofenceResponse response = geofenceService.create(request);
-		return ResponseEntity.created(URI.create("/api/v1/geofences/" + response.id())).body(response);
+		return ResponseEntity.created(URI.create(GEOFENCES + "/" + response.id())).body(response);
 	}
 
 	@GetMapping
@@ -49,7 +52,7 @@ public class GeofenceController {
 		return geofenceService.findById(id);
 	}
 
-	@PatchMapping("/{id}")
+	@PatchMapping(value = "/{id}", consumes = APPLICATION_JSON_VALUE)
 	public GeofenceResponse update(
 			@PathVariable UUID id,
 			@Valid @RequestBody UpdateGeofenceRequest request) {
@@ -62,7 +65,7 @@ public class GeofenceController {
 		return ResponseEntity.noContent().build();
 	}
 
-	@PostMapping("/check")
+	@PostMapping(value = "/check", consumes = APPLICATION_JSON_VALUE)
 	public CheckGeofenceResponse check(@Valid @RequestBody CheckGeofenceRequest request) {
 		return geofenceService.checkRestrictions(request);
 	}
